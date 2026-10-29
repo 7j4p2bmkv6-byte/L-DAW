@@ -1,4 +1,4 @@
-name: Build L-DAW
+name: Build L-DAW v3 (HTTPS fix)
 
 on:
   push:
@@ -13,21 +13,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get Tracktion Engine (+ JUCE)
+      - name: Get Tracktion Engine and JUCE (HTTPS v3)
         shell: bash
         run: |
           set -e
+          echo "=== L-DAW workflow v3: no SSH, no recurse-submodules ==="
           git config --global advice.detachedHead false
-          # 1) Tracktion Engine WITHOUT submodules
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+          # 1) Tracktion Engine only (no submodules)
           git clone --depth 1 --branch "$TE_REF" https://github.com/Tracktion/tracktion_engine.git external/tracktion_engine
           cd external/tracktion_engine
-          # 2) Rewrite the JUCE submodule address from SSH (needs a key) to public HTTPS
-          git config --file .gitmodules submodule.modules/juce.url https://github.com/juce-framework/JUCE.git
-          git submodule sync
-          # 3) Fetch the exact JUCE version Tracktion expects (fallback: full history)
-          git submodule update --init --depth 1 modules/juce || git submodule update --init modules/juce
-          echo "JUCE version:" && git -C modules/juce log -1 --oneline
+
+          # 2) Which JUCE commit does this Tracktion version expect?
+          JUCE_SHA=$(git ls-tree HEAD modules/juce | awk '{print $3}')
+          echo "Tracktion expects JUCE commit: $JUCE_SHA"
+
+          # 3) Download that exact JUCE version as a zip over HTTPS (no git, no keys)
+          rm -rf modules/juce
+          curl -L --fail -o juce.zip "https://github.com/juce-framework/JUCE/archive/$JUCE_SHA.zip"
+          unzip -q juce.zip -d modules
+          mv "modules/JUCE-$JUCE_SHA" modules/juce
+          rm juce.zip
           ls modules
+          test -f modules/juce/CMakeLists.txt && echo "JUCE OK"
 
       - name: Get Steinberg ASIO SDK
         shell: pwsh
