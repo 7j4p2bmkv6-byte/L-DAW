@@ -1,4 +1,4 @@
-name: Build L-DAW v4
+name: Build L-DAW v5
 
 on:
   push:
@@ -62,28 +62,32 @@ jobs:
             }
           }
 
-      - name: Locate L-DAW source (works even if code is in a subfolder)
+      - name: Collect L-DAW source files (any upload layout)
         shell: bash
         run: |
           set -e
-          echo "=== L-DAW workflow v4 ==="
-          MAIN=$(find . -path ./external -prune -o -path ./build -prune -o -type f -iname "MidiEditors.cpp" -print | head -n 1)
-          if [ -z "$MAIN" ]; then
-            echo "ERROR: Could not find Source/MidiEditors.cpp anywhere in the repository."
-            echo "Files in repository:"; find . -path ./external -prune -o -path ./.git -prune -o -type f -print
-            exit 1
-          fi
-          SRC_DIR=$(dirname "$MAIN")
-          PROJ_DIR=$(dirname "$SRC_DIR")
-          echo "Found source in: $SRC_DIR  (project folder: $PROJ_DIR)"
-          if [ "$PROJ_DIR" != "." ]; then
-            rm -rf Source installer
-            cp -r "$SRC_DIR" Source
-            [ -d "$PROJ_DIR/installer" ] && cp -r "$PROJ_DIR/installer" installer
-            [ -f "$PROJ_DIR/CMakeLists.txt" ] && cp "$PROJ_DIR/CMakeLists.txt" CMakeLists.txt
-          fi
-          ls Source installer
-          grep -q "MidiEditors.cpp" CMakeLists.txt || { echo "ERROR: CMakeLists.txt is an old version - replace it with the L-DAW 0.2 one"; exit 1; }
+          echo "=== L-DAW workflow v5 ==="
+          mkdir -p _src _inst
+          # gather every .cpp/.h of the app (skip downloaded libraries and build output)
+          find . \( -path ./external -o -path ./build -o -path ./.git -o -path ./_src -o -path ./_inst \) -prune -o \
+                 -type f \( -name "*.cpp" -o -name "*.h" \) -print | while read f; do cp "$f" _src/; done
+          # installer script, wherever it is
+          ISS=$(find . \( -path ./external -o -path ./.git \) -prune -o -type f -name "*.iss" -print | head -n 1)
+          [ -n "$ISS" ] && cp "$ISS" _inst/LDAW.iss
+          # CMakeLists.txt, wherever it is (prefer the one that knows about MidiEditors.cpp)
+          CM=$(grep -rl --include=CMakeLists.txt "MidiEditors.cpp" . --exclude-dir=external --exclude-dir=build | head -n 1 || true)
+          if [ -z "$CM" ]; then echo "ERROR: CMakeLists.txt is an old version - replace it with the L-DAW 0.2 one"; exit 1; fi
+          [ "$CM" != "./CMakeLists.txt" ] && cp "$CM" CMakeLists.txt
+          rm -rf Source installer
+          mv _src Source
+          mv _inst installer
+          echo "--- Source ---";    ls Source
+          echo "--- installer ---"; ls installer
+          for f in Main.cpp MainComponent.cpp MainComponent.h ArrangeView.cpp ArrangeView.h MidiEditors.cpp MidiEditors.h EngineUI.h Theme.h; do
+            [ -f "Source/$f" ] || { echo "ERROR: missing $f - please upload it"; exit 1; }
+          done
+          [ -f installer/LDAW.iss ] || { echo "ERROR: missing LDAW.iss - please upload it"; exit 1; }
+          echo "All files found."
 
       - name: Configure
         shell: bash
