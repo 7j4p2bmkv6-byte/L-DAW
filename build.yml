@@ -16,12 +16,18 @@ jobs:
       - name: Get Tracktion Engine (+ JUCE)
         shell: bash
         run: |
-          # JUCE submodule is registered with an SSH url (git@github.com:...) -> force HTTPS
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          set -e
           git config --global advice.detachedHead false
-          git clone --depth 1 --branch "$TE_REF" --recurse-submodules --shallow-submodules \
-            https://github.com/Tracktion/tracktion_engine.git external/tracktion_engine
-          ls external/tracktion_engine/modules
+          # 1) Tracktion Engine WITHOUT submodules
+          git clone --depth 1 --branch "$TE_REF" https://github.com/Tracktion/tracktion_engine.git external/tracktion_engine
+          cd external/tracktion_engine
+          # 2) Rewrite the JUCE submodule address from SSH (needs a key) to public HTTPS
+          git config --file .gitmodules submodule.modules/juce.url https://github.com/juce-framework/JUCE.git
+          git submodule sync
+          # 3) Fetch the exact JUCE version Tracktion expects (fallback: full history)
+          git submodule update --init --depth 1 modules/juce || git submodule update --init modules/juce
+          echo "JUCE version:" && git -C modules/juce log -1 --oneline
+          ls modules
 
       - name: Get Steinberg ASIO SDK
         shell: pwsh
