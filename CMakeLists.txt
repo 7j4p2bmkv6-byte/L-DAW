@@ -46,6 +46,7 @@ juce_add_modules(ALIAS_NAMESPACE tracktion ${TE_MODULE_PATHS})
 juce_add_gui_app(LDAW
     PRODUCT_NAME "L-DAW"
     COMPANY_NAME "Landgren Audio"
+    BUNDLE_ID com.landgrenaudio.ldaw
     VERSION 0.2.0)
 
 juce_generate_juce_header(LDAW)
