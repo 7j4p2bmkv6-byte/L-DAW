@@ -1,4 +1,4 @@
-name: Build L-DAW v3 (HTTPS fix)
+name: Build L-DAW v4
 
 on:
   push:
@@ -61,6 +61,29 @@ jobs:
               Write-Host "Could not use $u : $_"
             }
           }
+
+      - name: Locate L-DAW source (works even if code is in a subfolder)
+        shell: bash
+        run: |
+          set -e
+          echo "=== L-DAW workflow v4 ==="
+          MAIN=$(find . -path ./external -prune -o -path ./build -prune -o -type f -iname "MidiEditors.cpp" -print | head -n 1)
+          if [ -z "$MAIN" ]; then
+            echo "ERROR: Could not find Source/MidiEditors.cpp anywhere in the repository."
+            echo "Files in repository:"; find . -path ./external -prune -o -path ./.git -prune -o -type f -print
+            exit 1
+          fi
+          SRC_DIR=$(dirname "$MAIN")
+          PROJ_DIR=$(dirname "$SRC_DIR")
+          echo "Found source in: $SRC_DIR  (project folder: $PROJ_DIR)"
+          if [ "$PROJ_DIR" != "." ]; then
+            rm -rf Source installer
+            cp -r "$SRC_DIR" Source
+            [ -d "$PROJ_DIR/installer" ] && cp -r "$PROJ_DIR/installer" installer
+            [ -f "$PROJ_DIR/CMakeLists.txt" ] && cp "$PROJ_DIR/CMakeLists.txt" CMakeLists.txt
+          fi
+          ls Source installer
+          grep -q "MidiEditors.cpp" CMakeLists.txt || { echo "ERROR: CMakeLists.txt is an old version - replace it with the L-DAW 0.2 one"; exit 1; }
 
       - name: Configure
         shell: bash
