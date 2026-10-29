@@ -16,6 +16,9 @@ jobs:
       - name: Get Tracktion Engine (+ JUCE)
         shell: bash
         run: |
+          # JUCE submodule is registered with an SSH url (git@github.com:...) -> force HTTPS
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global advice.detachedHead false
           git clone --depth 1 --branch "$TE_REF" --recurse-submodules --shallow-submodules \
             https://github.com/Tracktion/tracktion_engine.git external/tracktion_engine
           ls external/tracktion_engine/modules
