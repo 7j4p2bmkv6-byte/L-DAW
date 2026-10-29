@@ -1,0 +1,69 @@
+name: Build L-DAW
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      TE_REF: v3.2.0          # Tracktion Engine version (change to 'develop' to try the newest)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Tracktion Engine (+ JUCE)
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$TE_REF" --recurse-submodules --shallow-submodules \
+            https://github.com/Tracktion/tracktion_engine.git external/tracktion_engine
+          ls external/tracktion_engine/modules
+
+      - name: Get Steinberg ASIO SDK
+        shell: pwsh
+        run: |
+          $urls = @(
+            "https://www.steinberg.net/asiosdk",
+            "https://download.steinberg.net/sdk_downloads/asiosdk_2.3.3_2019-06-14.zip"
+          )
+          foreach ($u in $urls) {
+            try {
+              Write-Host "Trying $u"
+              Invoke-WebRequest -Uri $u -OutFile asiosdk.zip -UseBasicParsing -MaximumRedirection 10
+              Expand-Archive asiosdk.zip -DestinationPath external/asiosdk -Force
+              $h = Get-ChildItem -Path external/asiosdk -Recurse -Filter iasiodrv.h | Select-Object -First 1
+              if ($h) {
+                $dir = $h.DirectoryName -replace '\\','/'
+                "ASIO_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+                Write-Host "ASIO SDK found in $dir"
+                break
+              }
+            } catch {
+              Write-Host "Could not use $u : $_"
+            }
+          }
+
+      - name: Configure
+        shell: bash
+        run: cmake -B build -DASIO_INCLUDE_DIR="${ASIO_DIR:-}"
+
+      - name: Build app
+        shell: bash
+        run: cmake --build build --config Release --parallel
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = @("C:\Program Files (x86)\Inno Setup 6\ISCC.exe", "C:\Program Files\Inno Setup 6\ISCC.exe") |
+                  Where-Object { Test-Path $_ } | Select-Object -First 1
+          & $iscc installer\LDAW.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: L-DAW-Windows
+          path: |
+            dist/*.exe
+            build/LDAW_artefacts/Release/L-DAW.exe
