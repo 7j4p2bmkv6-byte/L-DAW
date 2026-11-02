@@ -20,8 +20,40 @@ namespace ldaw
         const juce::Colour dimText     { 0xff9a9ca3 };
         const juce::Colour record      { 0xffd8383a };
         const juce::Colour play        { 0xff3fbf6a };
+        const juce::Colour send        { 0xff36b3a8 };   // teal for send FX
+        const juce::Colour selection   { 0xfff2d16b };
     }
 
+    //--------------------------------------------------------------------------
+    // Return (send-FX) tracks are ordinary audio tracks marked with a property.
+    // They are hidden from the arrange view and appear as FX channels in the mixer.
+    //--------------------------------------------------------------------------
+    inline const juce::Identifier returnBusProp { "ldawReturnBus" };
+    constexpr int numSendBuses = 4;
+
+    inline bool isReturnTrack (const te::Track& t)  { return t.state.hasProperty (returnBusProp); }
+    inline int  returnBusOf (const te::Track& t)     { return (int) t.state.getProperty (returnBusProp, -1); }
+
+    inline juce::Array<te::AudioTrack*> getMusicTracks (te::Edit& e)
+    {
+        juce::Array<te::AudioTrack*> out;
+        for (auto* t : te::getAudioTracks (e))
+            if (! isReturnTrack (*t))
+                out.add (t);
+        return out;
+    }
+
+    inline juce::Array<te::AudioTrack*> getReturnTracks (te::Edit& e)
+    {
+        juce::Array<te::AudioTrack*> out;
+        for (int bus = 0; bus < numSendBuses; ++bus)
+            for (auto* t : te::getAudioTracks (e))
+                if (isReturnTrack (*t) && returnBusOf (*t) == bus)
+                    out.add (t);
+        return out;
+    }
+
+    //--------------------------------------------------------------------------
     inline double beatOf (te::Edit& e, te::TimePosition t)  { return e.tempoSequence.toBeats (t).inBeats(); }
     inline te::TimePosition timeOf (te::Edit& e, double b)  { return e.tempoSequence.toTime (te::BeatPosition::fromBeats (b)); }
 
@@ -45,4 +77,12 @@ namespace ldaw
         nc->getSequence().copyFrom (src.getSequence(), &e.getUndoManager());
         return nc.get();
     }
+
+    //--------------------------------------------------------------------------
+    // Shared note clipboard (piano roll <-> step editor)
+    //--------------------------------------------------------------------------
+    struct ClipNote { int pitch; double start, length; int velocity; };
+
+    inline std::vector<ClipNote>& noteClipboard()  { static std::vector<ClipNote> v; return v; }
+    inline double& noteClipboardSpan()            { static double s = 0.0; return s; }
 }
