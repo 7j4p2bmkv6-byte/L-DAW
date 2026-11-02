@@ -1,25 +1,17 @@
-# L-DAW 0.2 – Phase 1 + 2
+# L-DAW 0.3 – Mixer, send/insert effects, editing tools
 
-A small DAW built on JUCE + Tracktion Engine (GPL, private use).
+## Mixer (F9 or "Mixer" tab, F5 = back to Arrange)
+- One strip per track: instrument, 5 insert slots (+ FX), 4 send knobs, pan, fader, peak meter, M/S
+- FX returns A-D (default Reverb, Delay, Chorus, Phaser) with their own inserts and faders
+- Master strip with inserts (e.g. EQ -> Compressor -> Maximizer), fader and meter
+- Insert slot: click = open, right-click = bypass / remove. Double-click knobs/faders = reset
+- Effects: Reverb, Delay (tempo sync buttons), Chorus, Phaser, Compressor, Maximizer, EQ, Filter + any VST3 effect
 
-## Arrange
-- Transport: Space play/stop, Enter return to zero, R record, Loop 1-32 bars, Click, BPM
-- VST3 instrument per track (JNO-600, DR-1010, ...), Edit opens the plug-in panel
-- MIDI keyboard plays the selected track; R arms it for recording
-- Clips: drag = move (snaps to beat, Shift = 1/16), drag to other track = move there,
-  Ctrl/Alt-drag = copy, drag right edge = resize, double-click empty lane = new 1-bar clip,
-  double-click clip = open editor, Del = delete, Ctrl+D = duplicate, right-click = menu
-- Ctrl+Z / Ctrl+Y undo/redo, Ctrl+E show/hide editor
+## Piano roll tools (1-4)
+Select (box select, Shift add, drag to move, Ctrl-drag velocity) · Draw · Erase · Slice
+Ctrl+X/C/V cut/copy/paste (at yellow marker) · Del · Ctrl+D duplicate · Ctrl+A all · Q quantize
+Arrows: Left/Right nudge, Up/Down transpose (Shift = octave) · Esc deselect
 
-## Piano roll
-Click = add note (drag to set length), drag note = move, drag edge = resize,
-Shift-drag = velocity, right-click = delete, Alt = fine (no snap). Grid 1/4-1/32.
-
-## Step editor (drums)
-16 steps per bar, < > to change bar. Click/drag to paint, Shift = accent.
-Right-click a drum name to change its MIDI note (default = General MIDI map).
-Clips on tracks with "DR" / "drum" in the name or plug-in open here automatically.
-
-## Build
-Upload everything (incl. hidden .github folder) to a private GitHub repo.
-Actions -> "Build L-DAW" -> artifact L-DAW-Windows -> L-DAW-0.2.0-Windows-Setup.exe
+## Step editor
+Select / Draw / Erase. Select steps -> Ctrl+C -> ">" -> Ctrl+V copies bars.
+Right-click a drum name: fill every 1/2/4/8 steps, clear row, change MIDI note.

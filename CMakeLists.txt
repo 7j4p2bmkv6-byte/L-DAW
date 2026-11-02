@@ -3,18 +3,18 @@ cmake_minimum_required(VERSION 3.22)
 # Static MSVC runtime -> no Visual C++ redistributable needed on the target PC
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(LDAW VERSION 0.2.0 LANGUAGES C CXX)
+project(LDAW VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)              # Tracktion Engine requires C++20
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
-# Tracktion Engine (+ the JUCE submodule that ships with it)
+# Tracktion Engine (+ the JUCE that ships with it)
 # ---------------------------------------------------------------------------
 set(TE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/tracktion_engine" CACHE PATH "Tracktion Engine checkout")
 
 if(NOT EXISTS "${TE_DIR}/modules/tracktion_engine")
-    message(FATAL_ERROR "Tracktion Engine not found in ${TE_DIR}. Clone it with --recurse-submodules (see README.md).")
+    message(FATAL_ERROR "Tracktion Engine not found in ${TE_DIR}.")
 endif()
 
 set(JUCE_DIR "")
@@ -24,7 +24,7 @@ foreach(cand "${TE_DIR}/modules/juce" "${TE_DIR}/juce" "${TE_DIR}/modules/JUCE")
     endif()
 endforeach()
 if(NOT JUCE_DIR)
-    message(FATAL_ERROR "JUCE submodule not found inside ${TE_DIR}. Did you clone with --recurse-submodules?")
+    message(FATAL_ERROR "JUCE not found inside ${TE_DIR}.")
 endif()
 message(STATUS "Using JUCE from: ${JUCE_DIR}")
 
@@ -47,7 +47,7 @@ juce_add_gui_app(LDAW
     PRODUCT_NAME "L-DAW"
     COMPANY_NAME "Landgren Audio"
     BUNDLE_ID com.landgrenaudio.ldaw
-    VERSION 0.2.0)
+    VERSION 0.3.0)
 
 juce_generate_juce_header(LDAW)
 
@@ -55,7 +55,9 @@ target_sources(LDAW PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/ArrangeView.cpp
-    Source/MidiEditors.cpp)
+    Source/MidiEditors.cpp
+    Source/Effects.cpp
+    Source/MixerView.cpp)
 
 target_compile_definitions(LDAW PRIVATE
     JUCE_WEB_BROWSER=0
@@ -73,8 +75,7 @@ if(MSVC)
 endif()
 
 # ---------------------------------------------------------------------------
-# ASIO (Windows). Point ASIO_INCLUDE_DIR at the folder containing iasiodrv.h
-# (the "common" folder of Steinberg's ASIO SDK). The GitHub workflow does this.
+# ASIO (Windows) - the GitHub workflow downloads the SDK and sets this path
 # ---------------------------------------------------------------------------
 set(ASIO_INCLUDE_DIR "" CACHE PATH "Folder containing iasiodrv.h (ASIO SDK 'common' folder)")
 if(WIN32 AND ASIO_INCLUDE_DIR AND EXISTS "${ASIO_INCLUDE_DIR}/iasiodrv.h")
