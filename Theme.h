@@ -1,6 +1,8 @@
 #pragma once
-// L-DAW 0.4
+// L-DAW 0.4 (build fix 1)
 #include <JuceHeader.h>
+#include <optional>
+#include <type_traits>
 
 #define LDAW_VERSION_STRING "0.4.0"
 
@@ -40,17 +42,21 @@ namespace ldaw
     //--------------------------------------------------------------------------
     // Track / clip properties stored in the edit
     //--------------------------------------------------------------------------
-    inline const juce::Identifier returnBusProp { "ldawReturnBus" };   // send-FX return track
-    inline const juce::Identifier kindProp      { "ldawKind" };        // "audio" for audio tracks
-    inline const juce::Identifier inputProp     { "ldawInput" };       // chosen audio input
-    inline const juce::Identifier autoLanesProp { "ldawAutoLanes" };   // visible automation lanes
-    inline const juce::Identifier sourceBpmProp { "ldawSourceBpm" };   // original tempo of an audio clip
-    inline const juce::Identifier channelProp   { "ldawChannel" };     // "dyn" / "eq" channel-strip plug-ins
+    inline const juce::Identifier returnBusProp { "ldawReturnBus" };
+    inline const juce::Identifier kindProp      { "ldawKind" };
+    inline const juce::Identifier inputProp     { "ldawInput" };
+    inline const juce::Identifier autoLanesProp { "ldawAutoLanes" };
+    inline const juce::Identifier sourceBpmProp { "ldawSourceBpm" };
+    inline const juce::Identifier channelProp   { "ldawChannel" };
     constexpr int numSendBuses = 4;
 
     inline bool isReturnTrack (const te::Track& t)  { return t.state.hasProperty (returnBusProp); }
     inline int  returnBusOf (const te::Track& t)     { return (int) t.state.getProperty (returnBusProp, -1); }
-    inline bool isAudioTrack (const te::Track& t)   { return t.state.getProperty (kindProp).toString() == "audio"; }
+
+    // "Audio track" in L-DAW terms (record/import audio, no instrument).
+    // The AudioTrack overload is an exact match, so it wins over tracktion::isAudioTrack.
+    inline bool isAudioTrack (const te::Track& t)      { return t.state.getProperty (kindProp).toString() == "audio"; }
+    inline bool isAudioTrack (const te::AudioTrack& t) { return t.state.getProperty (kindProp).toString() == "audio"; }
 
     inline juce::Array<te::AudioTrack*> getMusicTracks (te::Edit& e)
     {
@@ -69,6 +75,60 @@ namespace ldaw
                 if (isReturnTrack (*t) && returnBusOf (*t) == bus)
                     out.add (t);
         return out;
+    }
+
+    //--------------------------------------------------------------------------
+    // AutomationCurve helpers: work with both the older (no UndoManager) and the
+    // newer Tracktion Engine signatures - the compiler picks whichever exists.
+    //--------------------------------------------------------------------------
+    namespace curve
+    {
+        template <typename C>
+        float valueAt (C& c, te::TimePosition t, float def)
+        {
+            if constexpr (requires { c.getValueAt (t, def); }) return c.getValueAt (t, def);
+            else                                                return c.getNumPoints() > 0 ? c.getValueAt (t) : def;
+        }
+
+        template <typename C>
+        int addPoint (C& c, te::TimePosition t, float v, juce::UndoManager* um)
+        {
+            if constexpr (requires { c.addPoint (t, v, 0.0f, um); }) return (int) c.addPoint (t, v, 0.0f, um);
+            else                                                      return (int) c.addPoint (t, v, 0.0f);
+        }
+
+        template <typename C>
+        void removePoint (C& c, int i, juce::UndoManager* um)
+        {
+            if constexpr (requires { c.removePoint (i, um); }) c.removePoint (i, um);
+            else                                                c.removePoint (i);
+        }
+
+        template <typename C>
+        void clear (C& c, juce::UndoManager* um)
+        {
+            if constexpr (requires { c.clear (um); }) c.clear (um);
+            else                                       c.clear();
+        }
+
+        template <typename F>
+        int asIndex (int fallback, F&& call)
+        {
+            using R = decltype (call());
+            if constexpr (std::is_void_v<R>) { call(); return fallback; }
+            else                             return (int) call();
+        }
+
+        template <typename C>
+        int movePoint (C& c, int i, te::TimePosition t, float v, juce::UndoManager* um)
+        {
+            if constexpr (requires { c.movePoint (i, t, v, std::nullopt, false, um); })
+                return asIndex (i, [&] { return c.movePoint (i, t, v, std::nullopt, false, um); });
+            else if constexpr (requires { c.movePoint (i, t, v, false, um); })
+                return asIndex (i, [&] { return c.movePoint (i, t, v, false, um); });
+            else
+                return asIndex (i, [&] { return c.movePoint (i, t, v, false); });
+        }
     }
 
     //--------------------------------------------------------------------------
@@ -151,12 +211,11 @@ namespace ldaw
         t.state.setProperty (autoLanesProp, keys.joinIntoString (";"), nullptr);
     }
 
-    // One horizontal lane in the arrange view: a track, or an automation lane under it
     struct Lane
     {
         te::AudioTrack* track = nullptr;
         int trackIndex = 0;
-        te::AutomatableParameter::Ptr param;     // null for the track lane itself
+        te::AutomatableParameter::Ptr param;
         juce::String key;
         int y = 0, h = 0;
 
