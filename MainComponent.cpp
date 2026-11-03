@@ -671,7 +671,7 @@ void MainComponent::rebuildTracks()
             {
                 if (edit == nullptr || hd.param == nullptr) return;
                 edit->getUndoManager().beginNewTransaction();
-                hd.param->getCurve().clear (&edit->getUndoManager());
+                ldaw::curve::clear (hd.param->getCurve(), &edit->getUndoManager());
             };
             tracksArea.addAndMakeVisible (h);
         }
