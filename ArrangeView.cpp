@@ -2,14 +2,44 @@
 
 using namespace ldaw;
 
+ArrangeView::ArrangeView()
+{
+    setWantsKeyboardFocus (false);
+    formatManager.registerBasicFormats();
+}
+
 double ArrangeView::pixelsPerBeat() const     { return juce::jmax (1, getWidth()) / (double) juce::jmax (1, barsVisible * 4); }
 double ArrangeView::xToBeats (float x) const  { return juce::jmax (0.0, x / pixelsPerBeat()); }
 float  ArrangeView::beatsToX (double b) const { return (float) (b * pixelsPerBeat()); }
-int    ArrangeView::numTracks() const         { return edit != nullptr ? te::getAudioTracks (*edit).size() : 0; }
 
-int ArrangeView::yToTrack (int y) const
+int ArrangeView::numTracks() const
 {
-    return juce::jlimit (0, juce::jmax (0, numTracks() - 1), (y - rulerHeight) / rowHeight);
+    int n = 0;
+    for (auto& l : lanes) if (! l.isAuto()) ++n;
+    return n;
+}
+
+int ArrangeView::laneIndexAt (int y) const
+{
+    for (int i = 0; i < (int) lanes.size(); ++i)
+        if (y >= lanes[(size_t) i].y && y < lanes[(size_t) i].y + lanes[(size_t) i].h)
+            return i;
+    return -1;
+}
+
+int ArrangeView::trackIndexAt (int y) const
+{
+    const int li = laneIndexAt (y);
+    if (li >= 0) return lanes[(size_t) li].trackIndex;
+    return y < rulerHeight ? 0 : juce::jmax (0, numTracks() - 1);
+}
+
+int ArrangeView::laneYForTrack (int trackIndex) const
+{
+    for (auto& l : lanes)
+        if (! l.isAuto() && l.trackIndex == trackIndex)
+            return l.y;
+    return rulerHeight;
 }
 
 void ArrangeView::select (te::EditItemID id)
@@ -19,7 +49,132 @@ void ArrangeView::select (te::EditItemID id)
     repaint();
 }
 
+juce::AudioThumbnail* ArrangeView::getThumb (const juce::File& f)
+{
+    const auto key = f.getFullPathName();
+    auto it = thumbs.find (key);
+    if (it != thumbs.end()) return it->second.get();
+
+    auto t = std::make_unique<juce::AudioThumbnail> (512, formatManager, thumbCache);
+    t->setSource (new juce::FileInputSource (f));
+    auto* raw = t.get();
+    thumbs[key] = std::move (t);
+    return raw;
+}
+
 //==============================================================================
+float ArrangeView::valueToY (const Lane& l, float v) const
+{
+    auto range = l.param->getValueRange();
+    const float norm = range.getLength() > 0.0f ? (v - range.getStart()) / range.getLength() : 0.5f;
+    return (float) l.y + 4.0f + (1.0f - juce::jlimit (0.0f, 1.0f, norm)) * (float) (l.h - 8);
+}
+
+float ArrangeView::yToValue (const Lane& l, float y) const
+{
+    auto range = l.param->getValueRange();
+    const float norm = 1.0f - juce::jlimit (0.0f, 1.0f, (y - (float) l.y - 4.0f) / (float) juce::jmax (1, l.h - 8));
+    return range.getStart() + norm * range.getLength();
+}
+
+int ArrangeView::pointNear (const Lane& l, juce::Point<float> p) const
+{
+    auto& curve = l.param->getCurve();
+    for (int i = 0; i < curve.getNumPoints(); ++i)
+    {
+        juce::Point<float> pt (beatsToX (beatOf (*edit, curve.getPointTime (i))), valueToY (l, curve.getPointValue (i)));
+        if (pt.getDistanceFrom (p) < 7.0f)
+            return i;
+    }
+    return -1;
+}
+
+void ArrangeView::drawAutomationLane (juce::Graphics& g, const Lane& l)
+{
+    const float w = (float) getWidth();
+    g.setColour (colours::background.darker (0.35f));
+    g.fillRect (0.0f, (float) l.y, w, (float) l.h);
+    g.setColour (colours::automation.withAlpha (0.15f));
+    g.drawHorizontalLine (l.y + l.h - 1, 0.0f, w);
+
+    auto& curve = l.param->getCurve();
+    const float current = l.param->getCurrentValue();
+
+    juce::Path path;
+    if (curve.getNumPoints() == 0)
+    {
+        const float y = valueToY (l, current);
+        path.startNewSubPath (0.0f, y);
+        path.lineTo (w, y);
+        g.setColour (colours::automation.withAlpha (0.35f));
+        g.strokePath (path, juce::PathStrokeType (1.5f));
+        g.setColour (colours::dimText);
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+        g.drawText ("Click to add points, or turn on A.Write and move the control while playing",
+                    juce::Rectangle<int> (8, l.y, getWidth() - 16, l.h), juce::Justification::centredLeft);
+        return;
+    }
+
+    bool first = true;
+    for (float x = 0.0f; x <= w; x += 2.0f)
+    {
+        const float v = curve.getValueAt (timeOf (*edit, xToBeats (x)), current);
+        const float y = valueToY (l, v);
+        if (first) { path.startNewSubPath (x, y); first = false; }
+        else         path.lineTo (x, y);
+    }
+
+    // fill under the curve
+    juce::Path fill (path);
+    fill.lineTo (w, (float) (l.y + l.h));
+    fill.lineTo (0.0f, (float) (l.y + l.h));
+    fill.closeSubPath();
+    g.setColour (colours::automation.withAlpha (0.12f));
+    g.fillPath (fill);
+
+    g.setColour (colours::automation);
+    g.strokePath (path, juce::PathStrokeType (1.8f));
+
+    for (int i = 0; i < curve.getNumPoints(); ++i)
+    {
+        const float x = beatsToX (beatOf (*edit, curve.getPointTime (i)));
+        if (x < -6.0f || x > w + 6.0f) continue;
+        const float y = valueToY (l, curve.getPointValue (i));
+        g.setColour (colours::background);
+        g.fillEllipse (x - 4.0f, y - 4.0f, 8.0f, 8.0f);
+        g.setColour (colours::automation);
+        g.drawEllipse (x - 4.0f, y - 4.0f, 8.0f, 8.0f, 1.5f);
+    }
+}
+
+void ArrangeView::drawAudioClip (juce::Graphics& g, te::WaveAudioClip& clip, juce::Rectangle<float> r)
+{
+    auto file = clip.getOriginalFile();
+    auto* thumb = getThumb (file);
+    if (thumb == nullptr || thumb->getTotalLength() <= 0.0) return;
+
+    auto pos = clip.getPosition();
+    const double clipSeconds = pos.time.getLength().inSeconds();
+    const double srcBpm = audio::getSourceBpm (clip);
+
+    double ratio = clip.getSpeedRatio();
+    if (clip.getAutoTempo() && srcBpm > 0.0)
+        ratio = projectBpm (*edit) / srcBpm;
+
+    const double srcStart = juce::jmax (0.0, pos.offset.inSeconds());
+    const double srcEnd   = juce::jmin (thumb->getTotalLength(), srcStart + clipSeconds * ratio);
+
+    auto area = r.reduced (2.0f).withTrimmedTop (13.0f).toNearestInt();
+    if (srcEnd <= srcStart || area.getWidth() < 2) return;
+
+    // the visible source range may end before the clip ends (clip longer than file)
+    const double usedSeconds = (srcEnd - srcStart) / juce::jmax (0.0001, ratio);
+    area.setWidth ((int) juce::jmin ((double) area.getWidth(), usedSeconds / clipSeconds * area.getWidth()));
+
+    g.setColour (juce::Colours::white.withAlpha (0.8f));
+    thumb->drawChannels (g, area, srcStart, srcEnd, 1.0f);
+}
+
 void ArrangeView::paint (juce::Graphics& g)
 {
     g.fillAll (colours::background);
@@ -28,18 +183,20 @@ void ArrangeView::paint (juce::Graphics& g)
     auto& tc = edit->getTransport();
     const auto w = (float) getWidth();
     const auto h = (float) getHeight();
-    const auto tracks = te::getAudioTracks (*edit);
 
-    // lanes
-    for (int i = 0; i < tracks.size(); ++i)
+    // track lanes background
+    for (auto& l : lanes)
     {
-        const float y = (float) (rulerHeight + i * rowHeight);
-        g.setColour (i == selectedTrack ? colours::panel.brighter (0.06f)
-                                        : (i % 2 == 0 ? colours::background : colours::background.brighter (0.03f)));
-        g.fillRect (0.0f, y, w, (float) rowHeight);
+        if (l.isAuto()) continue;
+        g.setColour (l.trackIndex == selectedTrack ? colours::panel.brighter (0.06f)
+                                                   : (l.trackIndex % 2 == 0 ? colours::background : colours::background.brighter (0.03f)));
+        g.fillRect (0.0f, (float) l.y, w, (float) l.h);
     }
 
-    // loop range
+    for (auto& l : lanes)
+        if (l.isAuto())
+            drawAutomationLane (g, l);
+
     if (tc.looping.get())
     {
         auto lr = tc.getLoopRange();
@@ -51,14 +208,12 @@ void ArrangeView::paint (juce::Graphics& g)
         g.fillRect (x1, (float) rulerHeight - 5.0f, x2 - x1, 5.0f);
     }
 
-    // grid
     for (int beat = 0; beat <= barsVisible * 4; ++beat)
     {
         g.setColour (juce::Colours::white.withAlpha ((beat % 4) == 0 ? 0.14f : 0.05f));
         g.drawVerticalLine ((int) beatsToX (beat), (float) rulerHeight, h);
     }
 
-    // ruler
     g.setColour (colours::panel);
     g.fillRect (0.0f, 0.0f, w, (float) rulerHeight - 5.0f);
     g.setFont (juce::Font (juce::FontOptions (12.0f)));
@@ -71,31 +226,42 @@ void ArrangeView::paint (juce::Graphics& g)
     }
 
     // clips
-    for (int i = 0; i < tracks.size(); ++i)
+    for (auto& l : lanes)
     {
-        const float laneY = (float) (rulerHeight + i * rowHeight);
+        if (l.isAuto()) continue;
+        const float laneY = (float) l.y;
 
-        for (auto* clip : tracks[i]->getClips())
+        for (auto* clip : l.track->getClips())
         {
             auto pos = clip->getPosition();
             const double sb = beatOf (*edit, pos.getStart());
             const double eb = beatOf (*edit, pos.getEnd());
             juce::Rectangle<float> r (beatsToX (sb), laneY + 3.0f,
-                                      juce::jmax (3.0f, beatsToX (eb) - beatsToX (sb)), (float) rowHeight - 6.0f);
+                                      juce::jmax (3.0f, beatsToX (eb) - beatsToX (sb)), (float) l.h - 6.0f);
 
             const bool isSel = clip->itemID == selectedClip;
             const bool isDragged = drag.active && drag.moved && ! drag.copy && clip->itemID == drag.clipID;
+            auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
+            const auto base = wave != nullptr ? colours::audioClip : colours::clip;
 
-            g.setColour (colours::clip.withAlpha (isDragged ? 0.35f : 0.85f));
+            g.setColour (base.withAlpha (isDragged ? 0.35f : 0.85f));
             g.fillRoundedRectangle (r, 4.0f);
-            g.setColour (isSel ? colours::accent : colours::clip.brighter (0.5f));
+            g.setColour (isSel ? colours::accent : base.brighter (0.5f));
             g.drawRoundedRectangle (r, 4.0f, isSel ? 2.0f : 1.0f);
+
+            juce::String title = clip->getName();
+            if (wave != nullptr && wave->getAutoTempo())
+                title << "   [" << juce::String (audio::getSourceBpm (*wave), 1) << " bpm > follows tempo]";
 
             g.setColour (juce::Colours::white);
             g.setFont (juce::Font (juce::FontOptions (11.0f)));
-            g.drawText (clip->getName(), r.reduced (4.0f, 1.0f).removeFromTop (13.0f), juce::Justification::left, true);
+            g.drawText (title, r.reduced (4.0f, 1.0f).removeFromTop (13.0f), juce::Justification::left, true);
 
-            if (auto* mc = dynamic_cast<te::MidiClip*> (clip))
+            if (wave != nullptr)
+            {
+                drawAudioClip (g, *wave, r);
+            }
+            else if (auto* mc = dynamic_cast<te::MidiClip*> (clip))
             {
                 auto& notes = mc->getSequence().getNotes();
                 if (notes.size() > 0)
@@ -118,7 +284,6 @@ void ArrangeView::paint (juce::Graphics& g)
                 }
             }
 
-            // resize handle
             if (isSel)
             {
                 g.setColour (colours::accent);
@@ -127,13 +292,12 @@ void ArrangeView::paint (juce::Graphics& g)
         }
     }
 
-    // drag ghost
     if (drag.active && drag.moved)
     {
         const double s = drag.resize ? drag.start0 : drag.newStart;
         const double e = drag.resize ? drag.newEnd : drag.newStart + (drag.end0 - drag.start0);
         const int    t = drag.resize ? drag.track0 : drag.newTrack;
-        juce::Rectangle<float> ghost (beatsToX (s), (float) (rulerHeight + t * rowHeight) + 3.0f,
+        juce::Rectangle<float> ghost (beatsToX (s), (float) laneYForTrack (t) + 3.0f,
                                       beatsToX (e) - beatsToX (s), (float) rowHeight - 6.0f);
         g.setColour (colours::accent.withAlpha (0.25f));
         g.fillRoundedRectangle (ghost, 4.0f);
@@ -143,7 +307,6 @@ void ArrangeView::paint (juce::Graphics& g)
             g.drawText ("+ copy", ghost.reduced (4.0f), juce::Justification::bottomRight, false);
     }
 
-    // playhead
     const float px = beatsToX (beatOf (*edit, tc.getPosition()));
     g.setColour (tc.isRecording() ? colours::record : juce::Colours::white);
     g.drawVerticalLine ((int) px, 0.0f, h);
@@ -152,15 +315,16 @@ void ArrangeView::paint (juce::Graphics& g)
 //==============================================================================
 te::Clip* ArrangeView::clipAt (juce::Point<int> p, int& trackIndex) const
 {
-    trackIndex = (p.y - rulerHeight) / rowHeight;
-    if (edit == nullptr || p.y < rulerHeight) return nullptr;
+    trackIndex = -1;
+    const int li = laneIndexAt (p.y);
+    if (edit == nullptr || li < 0) return nullptr;
 
-    auto tracks = te::getAudioTracks (*edit);
-    if (! juce::isPositiveAndBelow (trackIndex, tracks.size())) return nullptr;
+    auto& l = lanes[(size_t) li];
+    trackIndex = l.trackIndex;
+    if (l.isAuto()) return nullptr;
 
     const double beat = xToBeats ((float) p.x);
-
-    for (auto* clip : tracks[trackIndex]->getClips())
+    for (auto* clip : l.track->getClips())
     {
         auto pos = clip->getPosition();
         if (beat >= beatOf (*edit, pos.getStart()) && beat < beatOf (*edit, pos.getEnd()))
@@ -171,6 +335,14 @@ te::Clip* ArrangeView::clipAt (juce::Point<int> p, int& trackIndex) const
 
 void ArrangeView::mouseMove (const juce::MouseEvent& e)
 {
+    const int li = laneIndexAt (e.y);
+    if (li >= 0 && lanes[(size_t) li].isAuto())
+    {
+        setMouseCursor (pointNear (lanes[(size_t) li], e.position) >= 0 ? juce::MouseCursor::DraggingHandCursor
+                                                                         : juce::MouseCursor::CrosshairCursor);
+        return;
+    }
+
     int ti = 0;
     if (auto* c = clipAt (e.getPosition(), ti))
     {
@@ -187,9 +359,9 @@ void ArrangeView::mouseMove (const juce::MouseEvent& e)
 void ArrangeView::mouseDown (const juce::MouseEvent& e)
 {
     drag = {};
+    autoLane = autoPoint = -1;
     if (edit == nullptr) return;
 
-    // Ruler -> move playhead (snaps to beat, Shift = free)
     if (e.y < rulerHeight)
     {
         double beat = xToBeats ((float) e.x);
@@ -199,10 +371,45 @@ void ArrangeView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    const int li = laneIndexAt (e.y);
+
+    // ---- automation lane ----
+    if (li >= 0 && lanes[(size_t) li].isAuto())
+    {
+        auto& l = lanes[(size_t) li];
+        if (onLaneClicked) onLaneClicked (l.trackIndex);
+
+        auto& curve = l.param->getCurve();
+        auto* um = &edit->getUndoManager();
+        edit->getUndoManager().beginNewTransaction();
+
+        const int near = pointNear (l, e.position);
+        if (e.mods.isPopupMenu())
+        {
+            if (near >= 0) curve.removePoint (near, um);
+            repaint();
+            return;
+        }
+
+        autoLane = li;
+        if (near >= 0)
+        {
+            autoPoint = near;
+        }
+        else
+        {
+            double beat = xToBeats ((float) e.x);
+            if (! e.mods.isAltDown()) beat = std::round (beat * 4.0) / 4.0;   // snap to 1/16
+            autoPoint = curve.addPoint (timeOf (*edit, beat), yToValue (l, (float) e.y), 0.0f, um);
+        }
+        repaint();
+        return;
+    }
+
     int trackIndex = 0;
     auto* clip = clipAt (e.getPosition(), trackIndex);
 
-    if (onLaneClicked && juce::isPositiveAndBelow (trackIndex, numTracks()))
+    if (onLaneClicked && trackIndex >= 0)
         onLaneClicked (trackIndex);
 
     if (clip == nullptr)
@@ -230,12 +437,25 @@ void ArrangeView::mouseDown (const juce::MouseEvent& e)
 
 void ArrangeView::mouseDrag (const juce::MouseEvent& e)
 {
+    if (autoLane >= 0 && autoPoint >= 0 && autoLane < (int) lanes.size())
+    {
+        auto& l = lanes[(size_t) autoLane];
+        auto& curve = l.param->getCurve();
+        double beat = xToBeats ((float) e.x);
+        if (! e.mods.isAltDown()) beat = std::round (beat * 4.0) / 4.0;
+        const float y = juce::jlimit ((float) l.y, (float) (l.y + l.h), (float) e.y);
+        autoPoint = curve.movePoint (autoPoint, timeOf (*edit, beat), yToValue (l, y), std::nullopt, false,
+                                     &edit->getUndoManager());
+        repaint();
+        return;
+    }
+
     if (! drag.active) return;
 
     drag.moved = drag.moved || e.getDistanceFromDragStart() > 3;
     if (! drag.moved) return;
 
-    const double snap  = e.mods.isShiftDown() ? 0.25 : 1.0;      // beat, Shift = 1/16
+    const double snap  = e.mods.isShiftDown() ? 0.25 : 1.0;
     const double delta = std::round ((xToBeats ((float) e.x) - drag.downBeat) / snap) * snap;
 
     if (drag.resize)
@@ -245,7 +465,7 @@ void ArrangeView::mouseDrag (const juce::MouseEvent& e)
     else
     {
         drag.newStart = juce::jmax (0.0, drag.start0 + delta);
-        drag.newTrack = yToTrack (e.y);
+        drag.newTrack = trackIndexAt (e.y);
         drag.copy     = e.mods.isCtrlDown() || e.mods.isAltDown();
     }
     repaint();
@@ -257,6 +477,7 @@ void ArrangeView::mouseUp (const juce::MouseEvent&)
         applyDrag();
 
     drag = {};
+    autoLane = autoPoint = -1;
     repaint();
 }
 
@@ -264,27 +485,63 @@ void ArrangeView::mouseDoubleClick (const juce::MouseEvent& e)
 {
     if (edit == nullptr || e.y < rulerHeight) return;
 
+    const int li = laneIndexAt (e.y);
+    if (li < 0 || lanes[(size_t) li].isAuto()) return;
+
     int trackIndex = 0;
     if (auto* clip = clipAt (e.getPosition(), trackIndex))
     {
-        if (onOpenEditor) onOpenEditor (clip->itemID, 0);
+        if (dynamic_cast<te::WaveAudioClip*> (clip) != nullptr)
+        {
+            if (onClipTempo) onClipTempo (clip->itemID);
+        }
+        else if (onOpenEditor)
+        {
+            onOpenEditor (clip->itemID, 0);
+        }
         return;
     }
 
-    // empty lane -> create a new 1-bar MIDI clip
-    auto tracks = te::getAudioTracks (*edit);
-    if (! juce::isPositiveAndBelow (trackIndex, tracks.size())) return;
-
+    auto& l = lanes[(size_t) li];
     const double startBeat = std::floor (xToBeats ((float) e.x) / 4.0) * 4.0;
-    edit->getUndoManager().beginNewTransaction();
 
-    if (auto nc = tracks[trackIndex]->insertMIDIClip (te::TimeRange (timeOf (*edit, startBeat), timeOf (*edit, startBeat + 4.0)), nullptr))
+    if (isAudioTrack (*l.track))
+    {
+        if (onImportAt) onImportAt (l.trackIndex, startBeat);
+        return;
+    }
+
+    edit->getUndoManager().beginNewTransaction();
+    if (auto nc = l.track->insertMIDIClip (te::TimeRange (timeOf (*edit, startBeat), timeOf (*edit, startBeat + 4.0)), nullptr))
     {
         nc->setName ("Clip");
         select (nc->itemID);
         if (onClipsChanged) onClipsChanged();
         if (onOpenEditor) onOpenEditor (nc->itemID, 0);
     }
+}
+
+bool ArrangeView::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (auto& f : files)
+        if (audio::isAudioFile (juce::File (f)))
+            return true;
+    return false;
+}
+
+void ArrangeView::filesDropped (const juce::StringArray& files, int x, int y)
+{
+    juce::Array<juce::File> list;
+    for (auto& f : files)
+        if (audio::isAudioFile (juce::File (f)))
+            list.add (juce::File (f));
+
+    const int li = laneIndexAt (y);
+    const int trackIndex = li >= 0 ? lanes[(size_t) li].trackIndex : -1;
+    const double beat = std::floor (xToBeats ((float) x));
+
+    if (onFilesDropped && ! list.isEmpty())
+        onFilesDropped (list, trackIndex, beat);
 }
 
 //==============================================================================
@@ -301,15 +558,14 @@ void ArrangeView::applyDrag()
     }
     else
     {
-        auto tracks = te::getAudioTracks (*edit);
+        auto tracks = getMusicTracks (*edit);
         auto newStart = timeOf (*edit, drag.newStart);
 
         if (drag.copy || drag.newTrack != drag.track0)
         {
-            auto* mc = dynamic_cast<te::MidiClip*> (clip);
-            if (mc != nullptr && juce::isPositiveAndBelow (drag.newTrack, tracks.size()))
+            if (juce::isPositiveAndBelow (drag.newTrack, tracks.size()))
             {
-                if (auto* nc = copyMidiClip (*mc, *tracks[drag.newTrack], newStart))
+                if (auto* nc = audio::copyClipTo (*clip, *tracks[drag.newTrack], newStart))
                 {
                     if (! drag.copy)
                         clip->removeFromParent();
@@ -340,13 +596,14 @@ void ArrangeView::deleteSelectedClip()
 
 void ArrangeView::duplicateSelectedClip()
 {
-    auto* mc = findMidiClip (edit, selectedClip);
-    if (mc == nullptr) return;
+    if (edit == nullptr) return;
+    auto* clip = te::findClipForID (*edit, selectedClip);
+    if (clip == nullptr) return;
 
-    if (auto* track = dynamic_cast<te::AudioTrack*> (mc->getTrack()))
+    if (auto* track = dynamic_cast<te::AudioTrack*> (clip->getTrack()))
     {
         edit->getUndoManager().beginNewTransaction();
-        if (auto* nc = copyMidiClip (*mc, *track, mc->getPosition().getEnd()))
+        if (auto* nc = audio::copyClipTo (*clip, *track, clip->getPosition().getEnd()))
             select (nc->itemID);
         if (onClipsChanged) onClipsChanged();
     }
@@ -354,9 +611,20 @@ void ArrangeView::duplicateSelectedClip()
 
 void ArrangeView::showClipMenu (te::EditItemID id)
 {
+    auto* clip = te::findClipForID (*edit, id);
+    if (clip == nullptr) return;
+    const bool isAudio = dynamic_cast<te::WaveAudioClip*> (clip) != nullptr;
+
     juce::PopupMenu m;
-    m.addItem (1, "Open in piano roll");
-    m.addItem (2, "Open in step editor (drums)");
+    if (isAudio)
+    {
+        m.addItem (5, "Tempo / time-stretch...");
+    }
+    else
+    {
+        m.addItem (1, "Open in piano roll");
+        m.addItem (2, "Open in step editor (drums)");
+    }
     m.addSeparator();
     m.addItem (3, "Duplicate   (Ctrl+D)");
     m.addItem (4, "Delete      (Del)");
@@ -370,5 +638,6 @@ void ArrangeView::showClipMenu (te::EditItemID id)
         if (r == 2 && safe->onOpenEditor) safe->onOpenEditor (id, 2);
         if (r == 3) safe->duplicateSelectedClip();
         if (r == 4) safe->deleteSelectedClip();
+        if (r == 5 && safe->onClipTempo) safe->onClipTempo (id);
     });
 }

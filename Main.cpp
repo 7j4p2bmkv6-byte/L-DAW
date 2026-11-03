@@ -5,7 +5,7 @@ class LDAWApplication : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override    { return "L-DAW"; }
-    const juce::String getApplicationVersion() override { return "0.2.0"; }
+    const juce::String getApplicationVersion() override { return LDAW_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override          { return false; }
 
     void initialise (const juce::String&) override
@@ -26,7 +26,7 @@ public:
             setUsingNativeTitleBar (true);
             setContentOwned (new MainComponent(), true);
             setResizable (true, true);
-            setResizeLimits (1100, 500, 4000, 3000);
+            setResizeLimits (1100, 600, 5000, 3000);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }

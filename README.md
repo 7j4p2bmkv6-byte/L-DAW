@@ -1,17 +1,19 @@
-# L-DAW 0.3 – Mixer, send/insert effects, editing tools
+# L-DAW 0.4 - automation, Reason-style mixer, audio tracks
 
-## Mixer (F9 or "Mixer" tab, F5 = back to Arrange)
-- One strip per track: instrument, 5 insert slots (+ FX), 4 send knobs, pan, fader, peak meter, M/S
-- FX returns A-D (default Reverb, Delay, Chorus, Phaser) with their own inserts and faders
-- Master strip with inserts (e.g. EQ -> Compressor -> Maximizer), fader and meter
-- Insert slot: click = open, right-click = bypass / remove. Double-click knobs/faders = reset
-- Effects: Reverb, Delay (tempo sync buttons), Chorus, Phaser, Compressor, Maximizer, EQ, Filter + any VST3 effect
+## Automation
+- "A" button on a track -> pick any parameter (instrument, channel EQ/dynamics, inserts, volume/pan) -> lane opens under the track
+- Draw: click = add point, drag = move (snaps to 1/16, Alt = free), right-click = delete. "Clear" empties a lane, "X" hides it
+- Record: turn on A.Write, press Play and move a knob/fader (plug-in window, mixer, track header). Lanes with new data open automatically
+- A.Read switches playback of automation on/off
+- Hardware knobs (MIDI CC) are recorded into the MIDI clip when recording MIDI
 
-## Piano roll tools (1-4)
-Select (box select, Shift add, drag to move, Ctrl-drag velocity) · Draw · Erase · Slice
-Ctrl+X/C/V cut/copy/paste (at yellow marker) · Del · Ctrl+D duplicate · Ctrl+A all · Q quantize
-Arrows: Left/Right nudge, Up/Down transpose (Shift = octave) · Esc deselect
+## Mixer (F3 = below the tracks, F9 = full window)
+- Sections DYNAMICS (compressor), EQ (4 bands, gain + freq), INSERTS (4 slots), FX SEND (4 sends), pan, metal fader, LED meter, MUTE/SOLO
+- Drag the bar above the mixer to resize; sections fold away automatically when there is little room (SHOW buttons on the left)
+- Master: master compressor (thres/ratio/attack/release) + inserts + meter
 
-## Step editor
-Select / Draw / Erase. Select steps -> Ctrl+C -> ">" -> Ctrl+V copies bars.
-Right-click a drum name: fill every 1/2/4/8 steps, clear row, change MIDI note.
+## Audio tracks
+- "+ Track" -> Audio track. "In:" chooses the input, R arms, Rec records (enable inputs under Audio / MIDI)
+- Import: "Import audio", double-click an empty part of an audio track, or drag files onto the timeline
+- Enter the original BPM (guessed from names like "loop_124bpm.wav") -> "Follow project tempo" time-stretches the clip
+- Double-click / right-click an audio clip to change its tempo settings
