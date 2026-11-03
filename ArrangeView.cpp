@@ -118,7 +118,7 @@ void ArrangeView::drawAutomationLane (juce::Graphics& g, const Lane& l)
     bool first = true;
     for (float x = 0.0f; x <= w; x += 2.0f)
     {
-        const float v = curve.getValueAt (timeOf (*edit, xToBeats (x)), current);
+       const float v = ldaw::curve::valueAt (curve, timeOf (*edit, xToBeats (x)), current);
         const float y = valueToY (l, v);
         if (first) { path.startNewSubPath (x, y); first = false; }
         else         path.lineTo (x, y);
@@ -386,7 +386,7 @@ void ArrangeView::mouseDown (const juce::MouseEvent& e)
         const int near = pointNear (l, e.position);
         if (e.mods.isPopupMenu())
         {
-            if (near >= 0) curve.removePoint (near, um);
+      if (near >= 0) ldaw::curve::removePoint (curve, near, um);
             repaint();
             return;
         }
@@ -400,7 +400,7 @@ void ArrangeView::mouseDown (const juce::MouseEvent& e)
         {
             double beat = xToBeats ((float) e.x);
             if (! e.mods.isAltDown()) beat = std::round (beat * 4.0) / 4.0;   // snap to 1/16
-            autoPoint = curve.addPoint (timeOf (*edit, beat), yToValue (l, (float) e.y), 0.0f, um);
+            autoPoint = ldaw::curve::addPoint (curve, timeOf (*edit, beat), yToValue (l, (float) e.y), um);
         }
         repaint();
         return;
@@ -444,8 +444,7 @@ void ArrangeView::mouseDrag (const juce::MouseEvent& e)
         double beat = xToBeats ((float) e.x);
         if (! e.mods.isAltDown()) beat = std::round (beat * 4.0) / 4.0;
         const float y = juce::jlimit ((float) l.y, (float) (l.y + l.h), (float) e.y);
-        autoPoint = curve.movePoint (autoPoint, timeOf (*edit, beat), yToValue (l, y), std::nullopt, false,
-                                     &edit->getUndoManager());
+        autoPoint = ldaw::curve::movePoint (curve, autoPoint, timeOf (*edit, beat), yToValue (l, y), &edit->getUndoManager());
         repaint();
         return;
     }
